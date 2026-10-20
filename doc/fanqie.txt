@@ -1,0 +1,53 @@
+*fanqie.txt*  Local TXT reading with verified Fanqie paragraph comments
+
+:Fanqie enable           Enable explicitly for the current local file.
+:Fanqie bind [name]      Search and confirm the book AND author.
+:Fanqie chapter          Manually bind the current chapter.
+:Fanqie comments         Open comments at cursor, or unmatched paragraph IDs.
+:Fanqie unmatched        List remote paragraphs not yet mapped to local text.
+:Fanqie calibrate [id]   Confirm a remote ID against the source cursor paragraph.
+:Fanqie uncalibrate      Remove the current paragraph's mapping.
+:Fanqie toc              Chapter picker.
+:Fanqie next / prev      Navigate local chapters.
+:Fanqie bookmark         Add a named bookmark.
+:Fanqie bookmarks        Jump to a bookmark.
+:Fanqie unbookmark       Delete a bookmark.
+:Fanqie refresh          Refresh current chapter statistics.
+:Fanqie offline / online Switch session-wide network mode.
+:Fanqie status           Show binding, chapter, mapping count and last error.
+:Fanqie disable          Remove this buffer's UI, mappings and jobs.
+
+CHAPTER DIRECTORY
+  Opens at the current chapter; independent of vim.ui.select.
+  j / k, Up / Down           Select an entry.
+  n / p, PageDown / PageUp   Next / previous directory page.
+  Ctrl-f / Ctrl-b, Space    Page down / up (Space: down).
+  Enter                     Jump to the selected chapter and focus the TXT.
+  /                         Search all chapters by title or chapter number.
+  c                         Clear search.
+  g                         Select the current chapter.
+  gg / G                    First / last entry.
+  q / Esc                   Close without jumping.
+
+  In the TXT: Ctrl-f / Ctrl-b scroll by screen; <localleader>fn / fp
+  jump to the next / previous chapter.
+
+COMMENTS WINDOW
+  Enter   Open an unmatched paragraph or toggle a comment's replies.
+  n / p   Next / previous comment page.
+  s       Toggle hot / latest order.
+  a       Confirm manual mapping to the paragraph under the SOURCE cursor.
+  u       Unmatched paragraph list.
+  r       Reload this paragraph; in unmatched view, refresh chapter statistics.
+  o       Open the image URL on the cursor line.
+  q       Close the panel.
+
+An absent count marker does NOT mean zero comments. Only verified text matches
+and explicit manual mappings receive markers. No novel body is downloaded.
+All source text stays in the original buffer without being rewritten.
+
+CONFIGURATION
+  require('fanqie').setup({ paragraph_mode = 'line', probe_limit = 3 })
+  See README.md for installation, storage paths, configuration and tests.
+
+vim:tw=78:ts=8:ft=help:norl:
