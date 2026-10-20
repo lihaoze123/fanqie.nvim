@@ -3,28 +3,49 @@ local ns=vim.api.nvim_create_namespace("fanqie.panel")
 local function clean(text)
   return (tostring(text or ""):gsub("%c",function(c) return c=="\n" and c or " " end))
 end
-function M.close(s)
-  if s.panel and vim.api.nvim_win_is_valid(s.panel.win) then vim.api.nvim_win_close(s.panel.win,true) end
+function M.close(s,quiet)
+  local panel=s.panel
   s.panel=nil
+  if panel and vim.api.nvim_win_is_valid(panel.win) then vim.api.nvim_win_close(panel.win,true) end
+  if panel and not quiet and panel.ctl.closed then panel.ctl.closed(s) end
 end
-function M.show(s,ctl)
+function M.show(s,ctl,opts)
+  opts=opts or {}
+  local kind=opts.kind or (s.panel and s.panel.kind) or "split"
+  if s.panel and s.panel.kind~=kind then M.close(s,true) end
   if s.panel and vim.api.nvim_win_is_valid(s.panel.win) then
-    M.render(s); vim.api.nvim_set_current_win(s.panel.win); return
+    M.render(s)
+    if opts.focus~=false then vim.api.nvim_set_current_win(s.panel.win) end
+    return
   end
   local origin=vim.api.nvim_get_current_win()
   if vim.api.nvim_win_is_valid(s.win) then vim.api.nvim_set_current_win(s.win) end
   local source_win=vim.api.nvim_get_current_win()
   local buf=vim.api.nvim_create_buf(false,true)
-  local win=vim.api.nvim_open_win(buf,true,{split="right",win=source_win,width=s.config.panel_width})
+  local config
+  if kind=="hover" then
+    config={relative="cursor",row=1,col=0,style="minimal",border="rounded",title=" 段评 · K 进入 · q 关闭 ",
+      width=math.max(1,math.min(s.config.hover_width,vim.o.columns-4)),
+      height=math.max(1,math.min(s.config.hover_height,vim.o.lines-vim.o.cmdheight-4))}
+  else config={split="right",win=source_win,width=s.config.panel_width} end
+  local win=vim.api.nvim_open_win(buf,opts.focus~=false,config)
   s.win=source_win
   vim.api.nvim_buf_set_name(buf,"fanqie://comments/"..s.buf.."/"..buf)
   vim.bo[buf].buftype="nofile"; vim.bo[buf].bufhidden="wipe"; vim.bo[buf].swapfile=false
   vim.bo[buf].filetype="fanqie"
   vim.wo[win].wrap=true; vim.wo[win].linebreak=true; vim.wo[win].number=false
   vim.wo[win].relativenumber=false; vim.wo[win].signcolumn="no"; vim.wo[win].conceallevel=0
-  s.panel={buf=buf,win=win,rows={}}
+  local panel={buf=buf,win=win,rows={},kind=kind,ctl=ctl}
+  s.panel=panel
+  vim.api.nvim_create_autocmd("BufWipeout",{buffer=buf,once=true,callback=function()
+    if s.panel==panel then
+      s.panel=nil
+      if ctl.closed then ctl.closed(s) end
+    end
+  end})
   local function map(key,fn,desc) vim.keymap.set("n",key,fn,{buffer=buf,silent=true,desc=desc}) end
   map("q",function() M.close(s) end,"关闭段评")
+  if kind=="hover" then map("<Esc>",function() M.close(s) end,"关闭段评悬浮窗") end
   map("<CR>",function()
     local row=s.panel and s.panel.rows[vim.api.nvim_win_get_cursor(win)[1]]
     if row then ctl.action(s,row) end
@@ -42,7 +63,7 @@ function M.show(s,ctl)
     end
   end,"打开图片链接")
   M.render(s)
-  if vim.api.nvim_win_is_valid(origin) and origin~=s.win then vim.api.nvim_set_current_win(origin) end
+  if opts.focus==false and vim.api.nvim_win_is_valid(origin) then vim.api.nvim_set_current_win(origin) end
 end
 function M.render(s)
   if not s.panel or not vim.api.nvim_buf_is_valid(s.panel.buf) then return end
@@ -62,7 +83,9 @@ function M.render(s)
   if s.error then add("请求失败："..s.error,nil,"DiagnosticError") end
   add("")
   local view=s.view or {mode="unknown"}
-  if view.mode=="unknown" then
+  if view.mode=="message" then
+    add(view.text or "将光标移到正文段落查看段评。",nil,"DiagnosticInfo")
+  elseif view.mode=="unknown" then
     add("未对齐段评（Enter 查看，a 绑定到正文光标段落）",nil,"Title")
     local count=0
     for _,id in ipairs(s.stats_order or {}) do
@@ -119,7 +142,10 @@ function M.render(s)
     elseif not s.loading then add("没有取得本页数据；r 重试。") end
   end
   local buf=s.panel.buf
-  local cursor=vim.api.nvim_win_is_valid(s.panel.win) and vim.api.nvim_win_get_cursor(s.panel.win) or {1,0}
+  local context=table.concat({s.current and s.current.line or 0,view.mode or "",view.para or "",view.page or 1},":")
+  local cursor=s.panel.context==context and vim.api.nvim_win_is_valid(s.panel.win)
+    and vim.api.nvim_win_get_cursor(s.panel.win) or {1,0}
+  s.panel.context=context
   vim.bo[buf].modifiable=true
   vim.api.nvim_buf_set_lines(buf,0,-1,false,lines)
   vim.bo[buf].modifiable=false

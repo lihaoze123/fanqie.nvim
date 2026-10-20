@@ -12,11 +12,25 @@ local defaults={
   curl="curl",panel_width=52,paragraph_mode="line",chapter_pattern=nil,
   request_interval_ms=650,cache_ttl=3600,probe_limit=3,offline=false,
   keymaps=true,restore_position=true,
+  follow_cursor=true,follow_delay_ms=350,hover_key="K",hover_width=64,hover_height=18,
 }
 local ctl={}
-local enter_chapter,render_marks,load_comments,probe
+local enter_chapter,render_marks,load_comments,probe,show_at_cursor,schedule_cursor
 local function notify(text,level) vim.notify(text,level or vim.log.levels.INFO,{title="fanqie.nvim"}) end
 local function alive(s) return M.sessions[s.buf]==s and vim.api.nvim_buf_is_valid(s.buf) end
+local function cancel_view(s)
+  s.view_token=(s.view_token or 0)+1
+  API.cancel(s.view_owner)
+  s.loading=false; s.locating=false
+  for _,state in pairs(s.replies or {}) do state.loading=false end
+end
+local function stop_cursor_timer(s)
+  s.cursor_ticket=(s.cursor_ticket or 0)+1
+  if s.cursor_timer then
+    if not s.cursor_timer:is_closing() then s.cursor_timer:stop(); s.cursor_timer:close() end
+    s.cursor_timer=nil
+  end
+end
 local function configure_window(s,win)
   if not s.windows[win] then
     s.windows[win]={wrap=vim.wo[win].wrap,linebreak=vim.wo[win].linebreak}
@@ -115,6 +129,7 @@ local function args_for(s,id,cursor)
 end
 probe=function(s,generation)
   if not alive(s) or generation~=s.generation or not s.remote then return end
+  if s.loading or s.locating then return end
   s.probed=s.probed or {}
   local id
   -- Verify candidates with the most comments first; at most probe_limit per entry.
@@ -146,13 +161,22 @@ end
 local function refresh(s,force)
   if not ready(s) then return end
   local gen=s.generation
-  s.error=nil; s.status="正在获取本章段评统计…"; UI.render(s)
+  s.error=nil; s.stats_error=nil; s.status="正在获取本章段评统计…"; UI.render(s)
   local function received(data,err,meta)
     if not alive(s) or gen~=s.generation then return end
-    if err then s.error=err; s.status="本地正文可正常阅读"; UI.render(s); return end
+    if err then
+      s.error=err; s.stats_error=err; s.status="本地正文可正常阅读"
+      if s.view and s.view.mode=="message" then s.view.text="段评统计获取失败，按 r 重试。" end
+      UI.render(s); return
+    end
     s.stats=data; s.stats_order=ordered(data); s.stats_ready=true
     s.status=meta.cached and "已载入段评统计缓存" or "已刷新本章段评统计"
     render_marks(s)
+    if s.awaiting_cursor and show_at_cursor and (vim.api.nvim_get_current_buf()==s.buf
+      or (s.panel and vim.api.nvim_get_current_buf()==s.panel.buf)) then
+      local opts=s.awaiting_cursor; s.awaiting_cursor=nil
+      show_at_cursor(s,opts)
+    end
     if meta.cached and not s.config.offline and not force then
       API.request("stats",{chapter=s.remote.id},{owner=s.buf,force=true},received)
     else probe(s,gen) end
@@ -162,12 +186,14 @@ end
 enter_chapter=function(s,ch,force)
   if s.current==ch and not force then return end
   API.cancel(s.buf)
+  cancel_view(s)
   s.generation=s.generation+1
   s.current=ch; s.paragraphs=P.paragraphs(s.lines,ch,s.config.paragraph_mode)
   s.remote=nil; s.stats={}; s.stats_order={}; s.stats_ready=false
   s.resolved={}; s.mappings={}; s.pages={}; s.replies={}; s.sort=0
   s.view={mode="unknown"}; s.loading=false; s.status=nil; s.error=nil
-  s.locating=false
+  s.locating=false; s.stats_error=nil
+  s.awaiting_cursor=nil; s.focus_key=nil
   s.probed={}; s.probe_count=0
   local saved=s.book.chapter_bindings and s.book.chapter_bindings[chapter_key(ch)]
   if saved then s.remote=saved
@@ -179,21 +205,22 @@ enter_chapter=function(s,ch,force)
     else s.status="章节未匹配：用 :Fanqie chapter 手动绑定"; UI.render(s) end
   end
 end
-load_comments=function(s,id,page_no,force)
+load_comments=function(s,id,page_no,force,opts)
+  opts=opts or {}
   if not ready(s) then return end
   if s.loading then notify("请等待当前评论页加载完成"); return end
   id=tostring(id); page_no=page_no or 1
   s.view={mode="comments",para=id,page=page_no}
   s.pages[id]=s.pages[id] or {}
   local pages=s.pages[id]
-  if pages[page_no] and not force then UI.show(s,ctl); return end
+  if pages[page_no] and not force then s.error=nil; UI.show(s,ctl,opts); return end
   local previous=pages[page_no-1]
   if page_no>1 and not previous then return end
   if page_no>1 and (not previous.has_more or previous.cursor=="") then notify("已到最后一页"); return end
-  local gen=s.generation
-  s.loading=true; s.error=nil; UI.show(s,ctl)
-  API.request("comments",args_for(s,id,previous and previous.cursor),{owner=s.buf,force=force},function(data,err,meta)
-    if not alive(s) or gen~=s.generation then return end
+  local gen,token=s.generation,s.view_token
+  s.loading=true; s.error=nil; UI.show(s,ctl,opts)
+  API.request("comments",args_for(s,id,previous and previous.cursor),{owner=s.view_owner,force=force},function(data,err,meta)
+    if not alive(s) or gen~=s.generation or token~=s.view_token then return end
     s.loading=false
     if err then s.error=err
     elseif data then
@@ -203,13 +230,20 @@ load_comments=function(s,id,page_no,force)
       accept_sources(s,id,data)
     end
     UI.render(s)
+    probe(s,gen)
   end)
 end
-function ctl.unknown(s) s.view={mode="unknown"}; UI.show(s,ctl) end
+function ctl.closed(s) cancel_view(s); s.awaiting_cursor=nil; stop_cursor_timer(s) end
+function ctl.unknown(s,opts) s.view={mode="unknown"}; UI.show(s,ctl,opts) end
 function ctl.reload(s)
   if s.view and s.view.mode=="comments" then
     local id=s.view.para; s.pages[id]={}; load_comments(s,id,1,true)
-  else refresh(s,true) end
+  else
+    if s.view and s.view.mode=="message" and s.panel then
+      s.awaiting_cursor={kind=s.panel.kind,focus=false,follow=s.panel.kind=="split"}
+    end
+    refresh(s,true)
+  end
 end
 function ctl.page(s,delta)
   if s.view and s.view.mode=="comments" then
@@ -229,9 +263,9 @@ local function replies(s,c,more)
   if not state then state={expanded=true,items={}}; s.replies[id]=state end
   if state.loading then return end
   state.loading=true; state.error=nil; UI.render(s)
-  local gen=s.generation
-  API.request("replies",{comment=id,cursor=state.cursor or ""},{owner=s.buf},function(data,err)
-    if not alive(s) or gen~=s.generation then return end
+  local gen,token=s.generation,s.view_token
+  API.request("replies",{comment=id,cursor=state.cursor or ""},{owner=s.view_owner},function(data,err)
+    if not alive(s) or gen~=s.generation or token~=s.view_token then return end
     state.loading=false
     if err then state.error=err
     elseif #data.comments==0 and (tonumber(c.reply_count) or 0)>0 and #state.items==0 then
@@ -293,12 +327,13 @@ local function current()
   if not s then notify("先在本地 TXT 中执行 :Fanqie enable") end
   return s
 end
-local function lookup_at_cursor(s,p)
-  if not p or not s.stats_ready or s.locating then ctl.unknown(s); return end
+local function lookup_at_cursor(s,p,opts)
+  opts=opts or {}
+  if not p or not s.stats_ready or s.locating then ctl.unknown(s,opts); return end
   local index,positions
   positions={}
   for i,local_p in ipairs(s.paragraphs) do positions[local_p.line]=i; if local_p.line==p.line then index=i end end
-  if not index then ctl.unknown(s); return end
+  if not index then ctl.unknown(s,opts); return end
   -- Offsets generate a candidate request only. A returned quote must verify it.
   local candidate,distance=tostring(index-1),math.huge
   for id,anchor in pairs(s.resolved) do
@@ -308,14 +343,22 @@ local function lookup_at_cursor(s,p)
       if math.abs(delta)<distance then candidate=tostring(tonumber(id)+delta); distance=math.abs(delta) end
     end
   end
-  if not s.stats[candidate] then ctl.unknown(s); return end
-  local gen,sort=s.generation,s.sort
+  if not s.stats[candidate] then
+    if opts.follow or opts.kind=="hover" then
+      s.view={mode="message",text="当前段落尚未对齐；按 u 查看未对齐段评，或按 a 手动校准。"}
+      UI.show(s,ctl,opts)
+    else ctl.unknown(s,opts) end
+    return
+  end
+  local gen,sort,token=s.generation,s.sort,s.view_token
   s.locating=true; s.status="正在核验当前段落的候选段评…"; s.error=nil
-  ctl.unknown(s)
-  API.request("comments",args_for(s,candidate),{owner=s.buf},function(data,err,meta)
-    if not alive(s) or gen~=s.generation then return end
+  s.view={mode="message",text="正在通过评论原文核验当前段落…"}; UI.show(s,ctl,opts)
+  API.request("comments",args_for(s,candidate),{owner=s.view_owner},function(data,err,meta)
+    if not alive(s) or gen~=s.generation or token~=s.view_token then return end
     s.locating=false
-    if err then s.error=err; UI.render(s); return end
+    if err then
+      s.error=err; s.view={mode="message",text="段评获取失败，按 r 重试。"}; UI.render(s); return
+    end
     if sort==s.sort then
       data.cached=meta.cached; s.pages[candidate]=s.pages[candidate] or {}; s.pages[candidate][1]=data
     end
@@ -323,12 +366,75 @@ local function lookup_at_cursor(s,p)
     local resolved=s.resolved[candidate]
     if resolved and resolved.hash==p.hash then
       s.status="当前段落已通过原文核验"
-      if paragraph(s,source_line(s))==p then load_comments(s,candidate,1) else UI.render(s) end
+      if paragraph(s,source_line(s))==p then load_comments(s,candidate,1,false,opts) else UI.render(s) end
     else
       s.status="候选段评与当前段落未能对齐，可从列表查看或手动校准"
-      UI.render(s)
+      if opts.follow or opts.kind=="hover" then
+        s.view={mode="message",text=s.status}; UI.render(s)
+      else ctl.unknown(s,opts) end
     end
+    probe(s,gen)
   end)
+end
+local function cursor_key(s)
+  local line=source_line(s)
+  local ch=P.at(s.chapters,line)
+  local p=ch==s.current and paragraph(s,line) or nil
+  return table.concat({ch.line,p and p.line or line,p and p.hash or ""},":")
+end
+show_at_cursor=function(s,opts)
+  opts=opts or {kind="split",focus=true}
+  stop_cursor_timer(s)
+  local ch=P.at(s.chapters,source_line(s))
+  if ch~=s.current then enter_chapter(s,ch) end
+  local key=cursor_key(s)
+  if opts.enter_existing and opts.kind=="hover" and s.panel and s.panel.kind=="hover" and s.focus_key==key
+    and vim.api.nvim_win_is_valid(s.panel.win) then
+    UI.show(s,ctl,{kind="hover",focus=true})
+    return
+  end
+  cancel_view(s)
+  s.focus_key=key; s.cursor_key=key; s.awaiting_cursor=nil; s.error=nil; s.status=nil
+  local p=paragraph(s,source_line(s))
+  local message
+  if not s.book.binding then message="先执行 :Fanqie bind 绑定本地文件对应的书籍。"
+  elseif not s.remote then message="当前章节尚未匹配；执行 :Fanqie chapter 手动绑定。"
+  elseif not p then message="将光标移到正文段落查看段评。"
+  elseif not s.stats_ready then
+    message=s.stats_error and ("段评统计获取失败："..s.stats_error.."；按 r 重试。") or "正在获取本章段评统计…"
+    if not s.stats_error then s.awaiting_cursor=vim.tbl_extend("force",opts,{enter_existing=false}) end
+  end
+  if message then
+    s.view={mode="message",text=message}; UI.show(s,ctl,opts); return
+  end
+  local id
+  for pid,local_p in pairs(s.resolved) do if local_p.line==p.line then id=pid; break end end
+  if id then load_comments(s,id,1,false,opts) else lookup_at_cursor(s,p,opts) end
+end
+schedule_cursor=function(s)
+  stop_cursor_timer(s)
+  local key=cursor_key(s)
+  if s.cursor_key~=key then
+    s.cursor_key=key
+    if s.panel and s.panel.kind=="hover" then UI.close(s) end
+    if s.panel and s.panel.kind=="split" and s.config.follow_cursor then
+      cancel_view(s); s.awaiting_cursor=nil; s.status=nil; s.error=nil
+      s.view={mode="message",text="光标停留后加载当前段落的段评…"}; UI.render(s)
+    end
+  end
+  local ticket=s.cursor_ticket
+  local delay=s.panel and s.panel.kind=="split" and s.config.follow_cursor and s.config.follow_delay_ms or 200
+  s.cursor_timer=vim.defer_fn(function()
+    if not alive(s) or ticket~=s.cursor_ticket then return end
+    s.cursor_timer=nil
+    if vim.api.nvim_get_current_buf()~=s.buf then return end
+    local ch=P.at(s.chapters,source_line(s))
+    if ch~=s.current then enter_chapter(s,ch) end
+    if s.panel and s.panel.kind=="split" and s.config.follow_cursor
+      and (s.focus_key~=cursor_key(s) or s.view.mode=="message") then
+      show_at_cursor(s,{kind="split",focus=false,follow=true})
+    end
+  end,delay)
 end
 function M.bind(s,query)
   s=s or current(); if not s then return end
@@ -401,7 +507,8 @@ function M.enable(buf)
   if err then notify(err,vim.log.levels.ERROR); return end
   book=book or {schema=1,file=canonical,bookmarks={}}
   local s={buf=buf,win=vim.api.nvim_get_current_win(),lines=lines,path=path,book=book,config=M.config,
-    chapters=P.parse(lines,M.config),title=vim.fn.fnamemodify(name,":t:r"),generation=0,cursor=1,windows={}}
+    chapters=P.parse(lines,M.config),title=vim.fn.fnamemodify(name,":t:r"),generation=0,cursor=1,windows={},
+    view_owner="fanqie:view:"..buf,view_token=0}
   M.sessions[buf]=s
   vim.b[buf].fanqie_enabled=true
   configure_window(s,s.win)
@@ -422,13 +529,19 @@ function M.enable(buf)
     if not alive(s) then return end
     s.win=vim.api.nvim_get_current_win(); configure_window(s,s.win)
     s.cursor=vim.api.nvim_win_get_cursor(s.win)[1]
-    local ch=P.at(s.chapters,s.cursor)
-    if ch~=s.current then
-      local gen=s.generation
-      vim.defer_fn(function() if alive(s) and s.generation==gen then enter_chapter(s,P.at(s.chapters,source_line(s))) end end,200)
-    end
+    schedule_cursor(s)
   end})
-  vim.api.nvim_create_autocmd("BufLeave",{group=group,buffer=buf,callback=function() position(s) end})
+  vim.api.nvim_create_autocmd("BufLeave",{group=group,buffer=buf,callback=function()
+    position(s); stop_cursor_timer(s)
+    local panel=s.panel
+    vim.schedule(function()
+      if alive(s) and s.panel==panel and panel and panel.kind=="hover"
+        and vim.api.nvim_get_current_buf()~=s.buf and vim.api.nvim_get_current_buf()~=panel.buf then UI.close(s) end
+    end)
+  end})
+  vim.api.nvim_create_autocmd("BufEnter",{group=group,buffer=buf,callback=function()
+    if alive(s) then s.win=vim.api.nvim_get_current_win(); schedule_cursor(s) end
+  end})
   vim.api.nvim_create_autocmd("BufWinLeave",{group=group,buffer=buf,callback=function()
     position(s); restore_window(s,vim.api.nvim_get_current_win())
   end})
@@ -439,7 +552,9 @@ function M.enable(buf)
   vim.api.nvim_create_autocmd({"TextChanged","TextChangedI","BufWritePost"},{group=group,buffer=buf,callback=function()
     if not alive(s) then return end
     s.lines=vim.api.nvim_buf_get_lines(buf,0,-1,false); s.chapters=P.parse(s.lines,s.config)
+    if s.panel and s.panel.kind=="hover" then UI.close(s) end
     enter_chapter(s,P.at(s.chapters,source_line(s)),true)
+    schedule_cursor(s)
   end})
   if M.config.keymaps then
     local keys={
@@ -447,6 +562,7 @@ function M.enable(buf)
       {"<leader>Ft","toc","章节目录"},{"<leader>Fn","next","下一章"},
       {"<leader>Fp","prev","上一章"},{"<leader>Fm","bookmark","添加书签"},
       {"<leader>Fb","bookmarks","书签列表"},
+      {"<leader>Fh","hover","段评悬浮预览"},
     }
     s.keys={}
     for _,item in ipairs(keys) do
@@ -455,13 +571,21 @@ function M.enable(buf)
         s.keys[#s.keys+1]=item[1]
       end
     end
+    if s.config.hover_key then
+      local existing=vim.fn.maparg(s.config.hover_key,"n",false,true)
+      if existing.buffer~=1 then
+        vim.keymap.set("n",s.config.hover_key,function() M.command("hover") end,
+          {buffer=buf,desc="番茄：段评悬浮预览"})
+        s.keys[#s.keys+1]=s.config.hover_key
+      end
+    end
   end
   notify("本地阅读已启用 · "..#s.chapters.." 个章节 · :Fanqie bind 绑定段评")
   return s
 end
 function M.disable(buf)
   local s=M.sessions[buf or vim.api.nvim_get_current_buf()]; if not s then return end
-  position(s); API.cancel(s.buf); TOC.close(s,false); UI.close(s)
+  position(s); stop_cursor_timer(s); cancel_view(s); API.cancel(s.buf); TOC.close(s,false); UI.close(s,true)
   if s.group then pcall(vim.api.nvim_del_augroup_by_id,s.group) end
   if vim.api.nvim_buf_is_valid(s.buf) then
     vim.api.nvim_buf_clear_namespace(s.buf,ns,0,-1)
@@ -471,7 +595,7 @@ function M.disable(buf)
   for win in pairs(s.windows) do restore_window(s,win) end
   M.sessions[s.buf]=nil
 end
-local commands={"enable","disable","bind","chapter","comments","unmatched","calibrate","uncalibrate",
+local commands={"enable","disable","bind","chapter","comments","hover","unmatched","calibrate","uncalibrate",
   "toc","next","prev","bookmark","bookmarks","unbookmark","refresh","offline","online","status"}
 function M.command(command)
   local args=vim.split(command or "", "%s+",{trimempty=true}); local action=args[1] or "enable"
@@ -481,10 +605,8 @@ function M.command(command)
   elseif action=="bind" then M.bind(s,table.concat(args," ",2))
   elseif action=="chapter" then bind_chapter(s)
   elseif action=="comments" then
-    if not ready(s) then return end
-    local p=paragraph(s,source_line(s)); local id
-    for pid,local_p in pairs(s.resolved) do if p and local_p.line==p.line then id=pid end end
-    if id then load_comments(s,id,1) else lookup_at_cursor(s,p) end
+    show_at_cursor(s,{kind="split",focus=true})
+  elseif action=="hover" then show_at_cursor(s,{kind="hover",focus=false,enter_existing=true})
   elseif action=="unmatched" then ctl.unknown(s)
   elseif action=="calibrate" then ctl.calibrate(s,args[2])
   elseif action=="uncalibrate" then
@@ -519,7 +641,8 @@ function M.command(command)
   elseif action=="offline" or action=="online" then
     M.config.offline=action=="offline"
     for _,session in pairs(M.sessions) do
-      API.cancel(session.buf); session.generation=session.generation+1; session.loading=false; session.locating=false
+      API.cancel(session.buf); cancel_view(session); session.generation=session.generation+1
+      session.awaiting_cursor=nil
       for _,state in pairs(session.replies) do state.loading=false end
       session.status=M.config.offline and "离线模式" or "在线模式"; UI.render(session)
     end
@@ -536,13 +659,17 @@ function M.setup(opts)
   vim.g.loaded_fanqie=true
   assert(M.config.paragraph_mode=="line" or M.config.paragraph_mode=="blank","paragraph_mode 必须为 line 或 blank")
   assert(type(M.config.request_interval_ms)=="number" and M.config.request_interval_ms>=0,"无效请求间隔")
+  assert(type(M.config.follow_delay_ms)=="number" and M.config.follow_delay_ms>=0,"无效光标跟随延迟")
+  assert(M.config.hover_key==false or (type(M.config.hover_key)=="string" and M.config.hover_key~=""),"hover_key 必须为按键字符串或 false")
+  assert(type(M.config.hover_width)=="number" and M.config.hover_width>=1
+    and type(M.config.hover_height)=="number" and M.config.hover_height>=1,"无效悬浮窗尺寸")
   API.setup(M.config)
   vim.api.nvim_create_user_command("Fanqie",function(cmd) M.command(cmd.args) end,{nargs="*",complete=function(lead)
     return vim.tbl_filter(function(c) return c:sub(1,#lead)==lead end,commands)
   end,desc="本地 TXT 阅读与番茄段评"})
   local group=vim.api.nvim_create_augroup("FanqieLifecycle",{clear=true})
   vim.api.nvim_create_autocmd("VimLeavePre",{group=group,callback=function()
-    for _,s in pairs(M.sessions) do position(s); API.cancel(s.buf) end
+    for _,s in pairs(M.sessions) do position(s); stop_cursor_timer(s); cancel_view(s); API.cancel(s.buf) end
   end})
   vim.api.nvim_create_autocmd("FocusLost",{group=group,callback=function()
     for _,s in pairs(M.sessions) do position(s) end

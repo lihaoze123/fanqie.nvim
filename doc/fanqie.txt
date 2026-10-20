@@ -4,6 +4,7 @@
 :Fanqie bind [name]      Search and confirm the book AND author.
 :Fanqie chapter          Manually bind the current chapter.
 :Fanqie comments         Open comments at cursor, or unmatched paragraph IDs.
+:Fanqie hover            Preview comments in a float; repeat to enter it.
 :Fanqie unmatched        List remote paragraphs not yet mapped to local text.
 :Fanqie calibrate [id]   Confirm a remote ID against the source cursor paragraph.
 :Fanqie uncalibrate      Remove the current paragraph's mapping.
@@ -35,12 +36,27 @@ CHAPTER DIRECTORY
 TXT BUFFER MAPPINGS
   <leader>Ft   Open the chapter directory.
   <leader>Fc   View comments at the cursor.
+  K            Hover comments; press again to enter the float.
+  <leader>Fh   Alternative hover mapping.
   <leader>Fu   List unmatched paragraph comments.
   <leader>Fn   Next chapter.
   <leader>Fp   Previous chapter.
   <leader>Fm   Add a bookmark.
   <leader>Fb   Open bookmarks.
   The prefix is uppercase F. Existing mappings are preserved.
+  K temporarily shadows a global mapping only in the enabled TXT buffer;
+  an existing buffer-local K is preserved. Disable restores global behavior.
+
+CURSOR FOLLOW AND HOVER
+  An open split comment window follows the source cursor after 350ms of rest.
+  Updates keep focus in the source. Rapid moves are debounced; obsolete view
+  requests are cancelled and their late responses ignored. No window opens
+  automatically when the comments window is closed.
+
+  K opens a non-entered float at the source cursor; repeat K to enter it and
+  scroll or page through comments. Moving to another source paragraph closes
+  the float. q or Esc closes it from inside. Floats and splits share caches
+  and show one at a time. Unverified paragraphs still require text matching.
 
 COMMENTS WINDOW
   Enter   Open an unmatched paragraph or toggle a comment's replies.
@@ -57,7 +73,13 @@ and explicit manual mappings receive markers. No novel body is downloaded.
 All source text stays in the original buffer without being rewritten.
 
 CONFIGURATION
-  require('fanqie').setup({ paragraph_mode = 'line', probe_limit = 3 })
+  require('fanqie').setup({
+    paragraph_mode = 'line', probe_limit = 3,
+    follow_cursor = true, follow_delay_ms = 350,
+    hover_key = 'K', hover_width = 64, hover_height = 18,
+  })
+  Set follow_cursor=false to disable paragraph following. Set hover_key=false
+  to disable K only; :Fanqie hover and <leader>Fh remain available.
   See README.md for installation, storage paths, configuration and tests.
 
 vim:tw=78:ts=8:ft=help:norl:

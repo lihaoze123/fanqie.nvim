@@ -2,7 +2,7 @@
 
 **在 Neovim 中阅读本地 TXT，查看与正文段落对应的番茄只读段评。**
 
-章节导航 · 段落核验 · 评论与回复 · 本地书签 · 进度恢复 · 离线缓存
+章节导航 · 段落核验 · 光标跟随 · 悬浮段评 · 本地书签 · 进度恢复 · 离线缓存
 
 > [!NOTE]
 > 小说正文始终来自本地文件。联网用于搜索书籍、读取目录、段评与回复，以及段评所需的设备注册和签名。
@@ -122,7 +122,7 @@ require("fanqie").setup({})
 2. 执行 `:Fanqie enable`，启用当前文件的阅读辅助。
 3. 执行 `:Fanqie bind`，输入书名并确认匹配的书籍和作者。
 4. 按 `<leader>Ft` 打开目录，选中章节后按 `Enter` 开始阅读。
-5. 将光标移到正文段落，按 `<leader>Fc` 查看段评。
+5. 将光标移到正文段落，按 `K` 悬浮预览，或按 `<leader>Fc` 打开右侧段评窗口。
 
 对应命令：
 
@@ -156,6 +156,22 @@ nvim -u examples/minimal.lua /path/to/book.txt
 
 已核验的段落末尾显示 `💬 数量`。将光标移到该段，执行 `:Fanqie comments` 或按 `<leader>Fc`，即可在右侧窗口查看评论。
 
+### 跟随光标
+
+打开右侧段评窗口后，将焦点切回正文，光标停在某段约 **350 毫秒**后，窗口会自动切换到该段的评论。更新时焦点保留在正文，便于继续阅读。
+
+连续移动光标会合并请求；离开原段落后取消旧请求，并忽略已经返回但过期的结果。移动到同一段落内的其他位置不会重复请求。关闭段评窗口后，移动光标不会自动重新打开窗口。
+
+### K 悬浮预览
+
+在正文中按 `K`，打开当前位置的段评悬浮窗，焦点保留在正文；**再按一次 `K`** 进入悬浮窗，即可滚动、翻页、展开回复。移到另一段时悬浮窗关闭；在悬浮窗中按 `q` 或 `Esc` 也可关闭。
+
+也可以使用 `<leader>Fh` 或 `:Fanqie hover`。悬浮窗与右侧窗口共用评论缓存和分页功能，同一时间显示一种视图。
+
+> [!TIP]
+> `K` 映射仅作用于已启用阅读的正文 buffer，关闭阅读辅助后恢复原有全局行为。
+> 已有的 buffer 局部 `K` 映射会保留；可使用 `<leader>Fh`，或通过 `hover_key` 自定义按键。
+
 当前段落尚未定位时，同一命令会尝试一个候选段号；候选只用于请求，必须经返回原文核验才显示为当前段评论。核验失败则保留未对齐列表。
 
 ### 段评窗口快捷键
@@ -169,7 +185,7 @@ nvim -u examples/minimal.lua /path/to/book.txt
 | <kbd>a</kbd> | 将当前段评绑定到**正文窗口光标所在的段落**，确认后保存 |
 | <kbd>o</kbd> | 在图片链接行，用系统浏览器打开图片 |
 | <kbd>r</kbd> | 刷新当前段评 |
-| <kbd>q</kbd> | 关闭段评窗口 |
+| <kbd>q</kbd> | 关闭段评窗口；悬浮窗也支持 <kbd>Esc</kbd> |
 
 加载未对齐段评后，若返回原文能唯一匹配本地段落，会自动补上标记。手动绑定的标记带有 `[手动]`。图片仅显示为链接，不会自动下载。
 
@@ -217,6 +233,7 @@ nvim -u examples/minimal.lua /path/to/book.txt
 | `:Fanqie bind [书名]` | 搜索并确认书籍和作者 |
 | `:Fanqie chapter` | 手动绑定当前章节 |
 | `:Fanqie comments` | 当前段落评论；未定位时打开未对齐列表 |
+| `:Fanqie hover` | 悬浮预览当前段落的评论；再次执行进入悬浮窗 |
 | `:Fanqie unmatched` | 未对齐段评列表 |
 | `:Fanqie calibrate [段号]` | 将远端段号绑定到正文光标所在段落 |
 | `:Fanqie uncalibrate` | 清除当前段落校准 |
@@ -233,6 +250,7 @@ nvim -u examples/minimal.lua /path/to/book.txt
 | 默认映射 | 操作 |
 | :--- | :--- |
 | `<leader>Fc` | 查看当前段评 |
+| `K` / `<leader>Fh` | 段评悬浮预览；再次按 `K` 进入悬浮窗 |
 | `<leader>Fu` | 查看未对齐段评 |
 | `<leader>Ft` | 打开章节目录 |
 | `<leader>Fn` / `<leader>Fp` | 下一章 / 上一章 |
@@ -253,9 +271,16 @@ require("fanqie").setup({
   offline = false,
   restore_position = true,
   keymaps = true,
+  follow_cursor = true,   -- 已打开的右侧段评窗口跟随正文光标
+  follow_delay_ms = 350,  -- 光标停留后更新的延迟（毫秒）
+  hover_key = "K",       -- false 关闭这个按键；命令和 <leader>Fh 仍可用
+  hover_width = 64,
+  hover_height = 18,
   curl = "curl",
 })
 ```
+
+设置 `follow_cursor = false` 可关闭自动跟随，使用 `K` 或 `<leader>Fc` 手动查看。`keymaps = false` 关闭全部默认映射，包括 `K`。
 
 ### 数据位置
 
@@ -281,8 +306,9 @@ require("fanqie").setup({
 nvim --headless -u NONE -i NONE -l tests/run.lua
 nvim --headless -u NONE -i NONE -l tests/async.lua
 nvim --headless -u NONE -i NONE -l tests/toc.lua
+nvim --headless -u NONE -i NONE -l tests/focus.lua
 ```
 
-包括 MD5 标准向量、章节解析/匹配、重复段落拒绝匹配、段落文本核验、回复环处理、界面、书签与持久化；验证 TXT 文件不被修改。
+包括 MD5 标准向量、章节解析/匹配、段落文本核验、回复环处理、书签与持久化，以及光标跟随、请求合并、过期响应、悬浮窗与按键恢复；验证 TXT 文件不被修改。
 
 本项目移植来源和模块改动见 [NOTICE.md](NOTICE.md)。
