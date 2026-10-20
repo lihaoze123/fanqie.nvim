@@ -443,10 +443,10 @@ function M.enable(buf)
   end})
   if M.config.keymaps then
     local keys={
-      {"<leader>fc","comments","查看段评"},{"<leader>fu","unmatched","未对齐段评"},
-      {"<leader>ft","toc","章节目录"},{"<leader>fn","next","下一章"},
-      {"<leader>fp","prev","上一章"},{"<leader>fm","bookmark","添加书签"},
-      {"<leader>fb","bookmarks","书签列表"},
+      {"<leader>Fc","comments","查看段评"},{"<leader>Fu","unmatched","未对齐段评"},
+      {"<leader>Ft","toc","章节目录"},{"<leader>Fn","next","下一章"},
+      {"<leader>Fp","prev","上一章"},{"<leader>Fm","bookmark","添加书签"},
+      {"<leader>Fb","bookmarks","书签列表"},
     }
     s.keys={}
     for _,item in ipairs(keys) do

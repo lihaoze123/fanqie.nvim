@@ -29,8 +29,18 @@ CHAPTER DIRECTORY
   gg / G                    First / last entry.
   q / Esc                   Close without jumping.
 
-  In the TXT: Ctrl-f / Ctrl-b scroll by screen; <leader>fn / fp
+  In the TXT: Ctrl-f / Ctrl-b scroll by screen; <leader>Fn / Fp
   jump to the next / previous chapter.
+
+TXT BUFFER MAPPINGS
+  <leader>Ft   Open the chapter directory.
+  <leader>Fc   View comments at the cursor.
+  <leader>Fu   List unmatched paragraph comments.
+  <leader>Fn   Next chapter.
+  <leader>Fp   Previous chapter.
+  <leader>Fm   Add a bookmark.
+  <leader>Fb   Open bookmarks.
+  The prefix is uppercase F. Existing mappings are preserved.
 
 COMMENTS WINDOW
   Enter   Open an unmatched paragraph or toggle a comment's replies.
