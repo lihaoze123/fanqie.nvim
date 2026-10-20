@@ -29,7 +29,7 @@ CHAPTER DIRECTORY
   gg / G                    First / last entry.
   q / Esc                   Close without jumping.
 
-  In the TXT: Ctrl-f / Ctrl-b scroll by screen; <localleader>fn / fp
+  In the TXT: Ctrl-f / Ctrl-b scroll by screen; <leader>fn / fp
   jump to the next / previous chapter.
 
 COMMENTS WINDOW

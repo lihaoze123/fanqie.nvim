@@ -121,8 +121,8 @@ require("fanqie").setup({})
 1. 用 Neovim 打开本地 TXT 文件。
 2. 执行 `:Fanqie enable`，启用当前文件的阅读辅助。
 3. 执行 `:Fanqie bind`，输入书名并确认匹配的书籍和作者。
-4. 按 `<localleader>ft` 打开目录，选中章节后按 `Enter` 开始阅读。
-5. 将光标移到正文段落，按 `<localleader>fc` 查看段评。
+4. 按 `<leader>ft` 打开目录，选中章节后按 `Enter` 开始阅读。
+5. 将光标移到正文段落，按 `<leader>fc` 查看段评。
 
 对应命令：
 
@@ -135,11 +135,11 @@ require("fanqie").setup({})
 绑定后自动匹配当前章节，读取本章段评统计，并用最多三个评论页探测文本锚点。绑定结果和校准会保存。重新打开文件后执行 `:Fanqie enable` 即可恢复。
 
 > [!TIP]
-> `<localleader>` 使用 Neovim 的 `maplocalleader` 配置，默认是反斜杠。
+> `<leader>` 使用 Neovim 的 `mapleader` 配置，默认是反斜杠。
 > 若希望使用逗号，请在插件加载前设置：
 
 ```lua
-vim.g.maplocalleader = ","
+vim.g.mapleader = ","
 ```
 
 ### 独立体验（可选）
@@ -150,11 +150,11 @@ vim.g.maplocalleader = ","
 nvim -u examples/minimal.lua /path/to/book.txt
 ```
 
-此配置将 `<localleader>` 设为逗号，并在启动时启用当前文件的阅读辅助。首次仍需 `:Fanqie bind`。
+此配置将 `<leader>` 设为逗号，并在启动时启用当前文件的阅读辅助。首次仍需 `:Fanqie bind`。
 
 ## 看段评
 
-已核验的段落末尾显示 `💬 数量`。将光标移到该段，执行 `:Fanqie comments` 或按 `<localleader>fc`，即可在右侧窗口查看评论。
+已核验的段落末尾显示 `💬 数量`。将光标移到该段，执行 `:Fanqie comments` 或按 `<leader>fc`，即可在右侧窗口查看评论。
 
 当前段落尚未定位时，同一命令会尝试一个候选段号；候选只用于请求，必须经返回原文核验才显示为当前段评论。核验失败则保留未对齐列表。
 
@@ -179,7 +179,7 @@ nvim -u examples/minimal.lua /path/to/book.txt
 
 ## 目录与按章阅读
 
-按 `<localleader>ft`（独立配置中为 `,ft`）打开插件自带的分页目录，默认选中当前章节：
+按 `<leader>ft`（独立配置中为 `,ft`）打开插件自带的分页目录，默认选中当前章节：
 
 | 按键 | 操作 |
 | :--- | :--- |
@@ -194,7 +194,7 @@ nvim -u examples/minimal.lua /path/to/book.txt
 | <kbd>g</kbd><kbd>g</kbd> / <kbd>G</kbd> | 第一项 / 最后一项 |
 | <kbd>q</kbd> / <kbd>Esc</kbd> | 关闭目录，回到原窗口 |
 
-进入正文后，`Ctrl-f/Ctrl-b` 按屏翻页；`<localleader>fn` 到下一章，`<localleader>fp` 到上一章。
+进入正文后，`Ctrl-f/Ctrl-b` 按屏翻页；`<leader>fn` 到下一章，`<leader>fp` 到上一章。
 
 ## 对齐规则
 
@@ -232,12 +232,12 @@ nvim -u examples/minimal.lua /path/to/book.txt
 
 | 默认映射 | 操作 |
 | :--- | :--- |
-| `<localleader>fc` | 查看当前段评 |
-| `<localleader>fu` | 查看未对齐段评 |
-| `<localleader>ft` | 打开章节目录 |
-| `<localleader>fn` / `<localleader>fp` | 下一章 / 上一章 |
-| `<localleader>fm` | 添加本地书签 |
-| `<localleader>fb` | 打开书签列表 |
+| `<leader>fc` | 查看当前段评 |
+| `<leader>fu` | 查看未对齐段评 |
+| `<leader>ft` | 打开章节目录 |
+| `<leader>fn` / `<leader>fp` | 下一章 / 上一章 |
+| `<leader>fm` | 添加本地书签 |
+| `<leader>fb` | 打开书签列表 |
 
 这些映射仅在启用阅读辅助的正文 buffer 中生效。已有快捷键会保留；设 `keymaps = false` 可关闭默认映射。
 
